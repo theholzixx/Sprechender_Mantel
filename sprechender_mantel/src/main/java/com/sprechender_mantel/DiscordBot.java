@@ -1,9 +1,12 @@
 package com.sprechender_mantel;
 
 import net.dv8tion.jda.api.JDABuilder;
+import net.dv8tion.jda.api.audio.AudioSendHandler;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
+import net.dv8tion.jda.api.entities.channel.concrete.VoiceChannel;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.managers.AudioManager;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import javax.security.auth.login.LoginException;
 
@@ -20,11 +23,14 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
 import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.github.kilianB.apis.googleTextToSpeech.GLanguage;
+import com.github.kilianB.apis.googleTextToSpeech.GoogleTextToSpeech;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -38,8 +44,17 @@ public class DiscordBot extends ListenerAdapter {
     static String History = "";
     static TextChannel textChannel;
     static boolean start = false;
+    static Timer timer = new Timer();
+    static GoogleTextToSpeech tts;
     
     public static void main(String[] args) throws LoginException {
+
+        String outputPath = "mpFiles/";
+
+        File outputDirectory = new File(outputPath);
+        outputDirectory.mkdirs();
+        
+        tts = new GoogleTextToSpeech(outputPath);
 
         String data = "Error";
         try {
@@ -92,31 +107,9 @@ public class DiscordBot extends ListenerAdapter {
 
         
 
-        // Start a timer to send a "?" every 10 minutes
-        Timer timer = new Timer();
-        timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                if (start) {
-                    try {
-                        String recieved = "?";
-                        System.out.println("\nNutzer: " + recieved);
-                        writer.write("\nNutzer: " + recieved);
-                        History = History + "\nNutzer: " + recieved;
-                        String response = getOpenLLaMAResponse(History.replaceAll("\n", "  "));
-                        textChannel.sendMessage(response).queue();
-                        System.out.println("\nKI: " + response);
-                        writer.write("\nKI: " + response);
-                        History = History + "\nKI: " + response;
-                        writer.flush();
-                        System.out.println("Timer!");
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-                
-            }
-        }, 0, ThreadLocalRandom.current().nextInt(180000, 600000)); // 600000 ms = 10 minutes
+        // Start a timer to send a "?" somewhere between 3 and 10 minutes
+        
+        timer.schedule(MyTimerTask(), 0, ThreadLocalRandom.current().nextInt(180000, 600000)); // 600000 ms = 10 minutes
 
         Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
             public void run() {
@@ -143,27 +136,23 @@ public class DiscordBot extends ListenerAdapter {
             System.out.println("ES GEHT LOS!");
             return;
         }
-        if (!start) start = true;
+        if (!start){
+            start = true;
+            VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
+            AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
+            audioManager.setSendingHandler(new);
+        }
+        System.out.println(event.getGuild());
         
         String message = event.getMessage().getContentRaw();
         textChannel = event.getGuild().getTextChannelsByName(CHANNEL_NAME,true).get(0);
 
-        try {
-            String recieved = message.replaceFirst("§", "");
-            System.out.println("\nNutzer: " + recieved);
-            writer.write("\nNutzer: " + recieved);
-            History = History + "\nNutzer: " + recieved;
-            String response = getOpenLLaMAResponse(History.replaceAll("\n", "  "));
-            textChannel.sendMessage(response).queue();
-            System.out.println("\nKI: " + response);
-            writer.write("\nKI: " + response);
-            History = History + "\nKI: " + response;
-            writer.flush();
-            System.out.println("Anfrage!");
-        } catch (Exception e) {
-            e.printStackTrace();
-            textChannel.sendMessage("Es gab einen Fehler bei der Verarbeitung deiner Anfrage.").queue();
-        }
+        //timer.cancel();
+        //timer.schedule(MyTimerTask(), 0, ThreadLocalRandom.current().nextInt(180000, 600000));
+
+        String recieved = message.replaceFirst("§", "");
+        GetResponse(recieved);
+        System.out.println("Anfrage!");
     }
 
     private static String getOpenLLaMAResponse(String prompt) throws Exception {
@@ -182,4 +171,74 @@ public class DiscordBot extends ListenerAdapter {
         
         return jsonObject.get("response").getAsString().replace("\\n", "").replace("\\\"", "\"").trim();
     }
+
+    private static String GetResponse(String recieved){
+        File convertedTextMP3;
+        try {
+            System.out.println("\nNutzer: " + recieved);
+            writer.write("\nNutzer: " + recieved);
+            History = History + "\nNutzer: " + recieved;
+            String response = getOpenLLaMAResponse(History.replaceAll("\n", "  "));
+            textChannel.sendMessage(response).queue();
+            System.out.println("\nKI: " + response);
+            writer.write("\nKI: " + response);
+            History = History + "\nKI: " + response;
+            writer.flush();
+            convertedTextMP3 = tts.convertText(response, GLanguage.German, "FileName");
+        } catch(IOException e){
+            e.printStackTrace();
+            textChannel.sendMessage("Es gab einen Fehler bei der Verarbeitung deiner Anfrage.").queue();
+            return null;
+        } catch (Exception e) {
+            e.printStackTrace();
+            textChannel.sendMessage("Es gab einen Fehler bei der Verarbeitung deiner Anfrage.").queue();
+            return null;
+        }
+        return convertedTextMP3.getAbsolutePath();
+    }
+
+    private static TimerTask MyTimerTask() {
+        TimerTask Timer = new TimerTask() {
+            @Override
+            public void run() {
+                if (start) {
+                    String recieved = "?";
+                    String Path = GetResponse(recieved);
+                    System.out.println(Path);
+                    System.out.println("Timer!");
+                }
+            }
+        };
+        return Timer;
+    }
+
+    static class AudioPlayerSendHandler implements AudioSendHandler {
+        private final AudioPlayer player;
+        private final File audioFile;
+
+        public AudioPlayerSendHandler(File audioFile) {
+            this.audioFile = audioFile;
+            AudioPlayerManager playerManager = new DefaultAudioPlayerManager();
+            playerManager.registerSourceManager(new LocalAudioSourceManager());
+            player = playerManager.createPlayer();
+            AudioItem item = playerManager.loadItem(audioFile.getAbsolutePath(), null);
+            player.playTrack((AudioTrack) item);
+        }
+
+        @Override
+        public boolean canProvide() {
+            return player.provide() != null;
+        }
+
+        @Override
+        public ByteBuffer provide20MsAudio() {
+            return ByteBuffer.wrap(player.provide().getData());
+        }
+
+        @Override
+        public boolean isOpus() {
+            return true;
+        }
+    }
+
 }
