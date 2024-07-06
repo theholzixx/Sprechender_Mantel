@@ -33,6 +33,14 @@ import com.github.kilianB.apis.googleTextToSpeech.GLanguage;
 import com.github.kilianB.apis.googleTextToSpeech.GoogleTextToSpeech;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
+import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
+import com.sedmelluq.discord.lavaplayer.source.local.LocalAudioSourceManager;
+import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
+import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
+import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
+import com.sedmelluq.discord.lavaplayer.player.AudioPlayerManager;
 
 public class DiscordBot extends ListenerAdapter {
 
@@ -46,6 +54,7 @@ public class DiscordBot extends ListenerAdapter {
     static boolean start = false;
     static Timer timer = new Timer();
     static GoogleTextToSpeech tts;
+    static VoiceChannel voiceChannel;
     
     public static void main(String[] args) throws LoginException {
 
@@ -101,7 +110,7 @@ public class DiscordBot extends ListenerAdapter {
             throw new Error();
         }
 
-        JDABuilder.createLight(data, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
+        JDABuilder.createLight(data, GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT, GatewayIntent.GUILD_VOICE_STATES)
                   .addEventListeners(new DiscordBot())
                   .build();
 
@@ -134,13 +143,12 @@ public class DiscordBot extends ListenerAdapter {
         if (event.getMessage().getContentRaw().startsWith("§Start")){
             start = true;
             System.out.println("ES GEHT LOS!");
+            VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
+            AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
             return;
         }
         if (!start){
             start = true;
-            VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
-            AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
-            audioManager.setSendingHandler(new);
         }
         System.out.println(event.getGuild());
         
@@ -151,12 +159,14 @@ public class DiscordBot extends ListenerAdapter {
         //timer.schedule(MyTimerTask(), 0, ThreadLocalRandom.current().nextInt(180000, 600000));
 
         String recieved = message.replaceFirst("§", "");
-        GetResponse(recieved);
+        VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
+        AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
+        GetResponse(recieved, voiceChannel);
         System.out.println("Anfrage!");
     }
 
     private static String getOpenLLaMAResponse(String prompt) throws Exception {
-        String requestBody = String.format("{\"model\": \"Llama3\", \"stream\": false, \"prompt\": \"%s\"}", prompt.replaceAll("\n", "  ").replaceAll("\"", "_")); //String requestBody = String.format("{\"model\": \"MagischerMantel\", \"stream\": false, \"prompt\": \"%s\"}", prompt);
+        String requestBody = String.format("{\"model\": \"MagischerMantel\", \"stream\": false, \"prompt\": \"%s\"}", prompt.replaceAll("\n", "  ").replaceAll("\"", "_")); //String requestBody = String.format("{\"model\": \"MagischerMantel\", \"stream\": false, \"prompt\": \"%s\"}", prompt);
         HttpRequest request = HttpRequest.newBuilder()
             .uri(URI.create(API_URL))
             .header("Content-Type", "application/json")
@@ -172,7 +182,7 @@ public class DiscordBot extends ListenerAdapter {
         return jsonObject.get("response").getAsString().replace("\\n", "").replace("\\\"", "\"").trim();
     }
 
-    private static String GetResponse(String recieved){
+    private static String GetResponse(String recieved, VoiceChannel voiceChannel){
         File convertedTextMP3;
         try {
             System.out.println("\nNutzer: " + recieved);
@@ -185,6 +195,7 @@ public class DiscordBot extends ListenerAdapter {
             History = History + "\nKI: " + response;
             writer.flush();
             convertedTextMP3 = tts.convertText(response, GLanguage.German, "FileName");
+            playAudio(convertedTextMP3.getAbsolutePath(), voiceChannel);
         } catch(IOException e){
             e.printStackTrace();
             textChannel.sendMessage("Es gab einen Fehler bei der Verarbeitung deiner Anfrage.").queue();
@@ -203,7 +214,7 @@ public class DiscordBot extends ListenerAdapter {
             public void run() {
                 if (start) {
                     String recieved = "?";
-                    String Path = GetResponse(recieved);
+                    String Path = GetResponse(recieved, voiceChannel);
                     System.out.println(Path);
                     System.out.println("Timer!");
                 }
@@ -211,6 +222,21 @@ public class DiscordBot extends ListenerAdapter {
         };
         return Timer;
     }
+
+    private static void playAudio(String filePath, VoiceChannel voiceChannel) {
+        if (voiceChannel == null) {
+            System.out.println("Voice channel not found.");
+            return;
+        }
+    
+        // Connect to the voice channel
+        AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
+        audioManager.openAudioConnection(voiceChannel);
+    
+        // Set the audio send handler
+        audioManager.setSendingHandler(new AudioPlayerSendHandler(new File(filePath)));
+    }
+    
 
     static class AudioPlayerSendHandler implements AudioSendHandler {
         private final AudioPlayer player;
@@ -221,8 +247,28 @@ public class DiscordBot extends ListenerAdapter {
             AudioPlayerManager playerManager = new DefaultAudioPlayerManager();
             playerManager.registerSourceManager(new LocalAudioSourceManager());
             player = playerManager.createPlayer();
-            AudioItem item = playerManager.loadItem(audioFile.getAbsolutePath(), null);
-            player.playTrack((AudioTrack) item);
+            playerManager.loadItem(audioFile.getAbsolutePath(), new AudioLoadResultHandler() {
+            @Override
+            public void trackLoaded(AudioTrack track) {
+                player.playTrack(track);
+            }
+
+            @Override
+            public void playlistLoaded(AudioPlaylist playlist) {
+                // If a playlist is loaded, play the first track
+                player.playTrack(playlist.getTracks().get(0));
+            }
+
+            @Override
+            public void noMatches() {
+                System.out.println("No matches found for the audio file.");
+            }
+
+            @Override
+            public void loadFailed(FriendlyException throwable) {
+                throwable.printStackTrace();
+            }
+        });
         }
 
         @Override
