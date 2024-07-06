@@ -143,12 +143,14 @@ public class DiscordBot extends ListenerAdapter {
         if (event.getMessage().getContentRaw().startsWith("§Start")){
             start = true;
             System.out.println("ES GEHT LOS!");
-            VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
+            voiceChannel = event.getGuild().getVoiceChannelById("1238165796568563742");
             AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
             return;
         }
         if (!start){
             start = true;
+            voiceChannel = event.getGuild().getVoiceChannelById("1238165796568563742");
+            AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
         }
         System.out.println(event.getGuild());
         
@@ -159,9 +161,8 @@ public class DiscordBot extends ListenerAdapter {
         //timer.schedule(MyTimerTask(), 0, ThreadLocalRandom.current().nextInt(180000, 600000));
 
         String recieved = message.replaceFirst("§", "");
-        VoiceChannel voiceChannel = event.getGuild().getVoiceChannelById("1259233480353517598");
-        AudioManager audioManager = voiceChannel.getGuild().getAudioManager();
-        GetResponse(recieved, voiceChannel);
+        
+        GetResponse(recieved);
         System.out.println("Anfrage!");
     }
 
@@ -182,7 +183,7 @@ public class DiscordBot extends ListenerAdapter {
         return jsonObject.get("response").getAsString().replace("\\n", "").replace("\\\"", "\"").trim();
     }
 
-    private static String GetResponse(String recieved, VoiceChannel voiceChannel){
+    private static String GetResponse(String recieved){
         File convertedTextMP3;
         try {
             System.out.println("\nNutzer: " + recieved);
@@ -214,7 +215,7 @@ public class DiscordBot extends ListenerAdapter {
             public void run() {
                 if (start) {
                     String recieved = "?";
-                    String Path = GetResponse(recieved, voiceChannel);
+                    String Path = GetResponse(recieved);
                     System.out.println(Path);
                     System.out.println("Timer!");
                 }
